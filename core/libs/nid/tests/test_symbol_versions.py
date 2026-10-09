@@ -198,10 +198,56 @@ def test_unversioned_library_is_still_patched(patcher):
     assert len({entry[0] for entry in after if entry[0]}) == len([entry for entry in after if entry[0]])
 
 
+def build_zero_hash_image(nbuckets, bloom_size):
+    entries = symbols(False)
+    image = bytearray(0x1000)
+    image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
+    names = [entry[0] for entry in entries if entry[0]]
+    strings, offsets = string_table(names)
+    for index, (name, version, shndx, symbol_type, value) in enumerate(entries):
+        info = (STB_GLOBAL << 4) | symbol_type
+        struct.pack_into("<IBBHQQ", image, DYNSYM_OFFSET + index * 24,
+                         offsets[name] if name else 0, info, 0, shndx, value, 0x10 if symbol_type else 0)
+    image[DYNSTR_OFFSET:DYNSTR_OFFSET + len(strings)] = strings
+    struct.pack_into("<IIII", image, HASH_OFFSET, nbuckets, HASHED_FROM, bloom_size, 6)
+    hash_size = 16 + bloom_size * 8 + nbuckets * 4
+    sections_list = [
+        (0, SHT_NULL, 0, 0, 0, 0, 0, 0, 0, 0),
+        (0, SHT_DYNSYM, 2, 0, DYNSYM_OFFSET, len(entries) * 24, 2, 1, 8, 24),
+        (0, SHT_STRTAB, 2, 0, DYNSTR_OFFSET, len(strings), 0, 0, 1, 0),
+        (0, SHT_GNU_HASH, 2, 0, HASH_OFFSET, hash_size, 1, 0, 8, 0),
+    ]
+    struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, 0, 0, SHOFF, 0, 64, 0, 0, 64, len(sections_list), 0)
+    for index, section in enumerate(sections_list):
+        struct.pack_into("<IIQQQQIIQQ", image, SHOFF + index * 64, *section)
+    return bytes(image)
+
+
+def test_zero_nbuckets_is_rejected(patcher):
+    image = build_zero_hash_image(0, 1)
+    result, on_disk = patch(patcher, image, SONAME)
+    assert result.returncode != 0, "zero nbuckets was not rejected"
+    message = result.stderr.decode("utf-8", errors="replace")
+    assert "zero" in message.lower(), message
+    assert result.stdout == b"", result.stdout
+    assert on_disk == image, "the rejected library was written back modified"
+
+
+def test_zero_bloom_size_is_rejected(patcher):
+    image = build_zero_hash_image(BUCKETS, 0)
+    result, on_disk = patch(patcher, image, SONAME)
+    assert result.returncode != 0, "zero bloom size was not rejected"
+    message = result.stderr.decode("utf-8", errors="replace")
+    assert "zero" in message.lower(), message
+    assert result.stdout == b"", result.stdout
+    assert on_disk == image, "the rejected library was written back modified"
+
 def main():
     patcher = Path(sys.argv[1]).resolve()
     test_versioned_library_is_rejected(patcher)
     test_unversioned_library_is_still_patched(patcher)
+    test_zero_nbuckets_is_rejected(patcher)
+    test_zero_bloom_size_is_rejected(patcher)
     print("NID patcher symbol version tests passed")
 
 
