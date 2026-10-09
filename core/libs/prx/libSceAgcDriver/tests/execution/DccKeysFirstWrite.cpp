@@ -434,6 +434,10 @@ int main() {
         std::optional<GuestBlock> shared;
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
+        if (device->DeviceName().starts_with("NVIDIA")) {
+            std::puts("skipped, DCC key tracking requires an AMD Vulkan driver");
+            return VulkanTestSkipped;
+        }
         block.emplace(false);
         Run(*device, block->Data());
         untracked.emplace(false);
