@@ -16,8 +16,8 @@ void Require(bool value) { if (!value) std::abort(); }
 
 constexpr std::uint16_t kFiberModuleId = 0x0006;
 constexpr std::uint16_t kUltModuleId = 0x0007;
+constexpr std::uint16_t kNpTrophy2ModuleId = 0x0110;
 constexpr int kModuleUnloaded = static_cast<int>(0x805A1001);
-
 }
 
 int main() {
@@ -37,4 +37,8 @@ int main() {
     Require(sceSysmoduleIsLoaded(kUltModuleId) == 0);
     Require(sceSysmoduleUnloadModule(kUltModuleId) == 0);
     Require(sceSysmoduleIsLoaded(kUltModuleId) == kModuleUnloaded);
+
+    Require(sceSysmoduleLoadModuleInternal(kNpTrophy2ModuleId) == 0);
+    Require(sceSysmoduleUnloadModuleInternal(kNpTrophy2ModuleId) == 0);
+    Require(sceSysmoduleUnloadModuleInternal(kNpTrophy2ModuleId) == kModuleUnloaded);
 }
