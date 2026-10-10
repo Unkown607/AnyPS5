@@ -12,8 +12,8 @@ namespace {
 void Require(bool value) { if (!value) std::abort(); }
 
 constexpr std::uint32_t kFiberModuleId = 0x00000006;
+constexpr std::uint32_t kNpTrophy2ModuleId = 0x00000110;
 constexpr int kModuleNotLoaded = static_cast<int>(0x80A90003);
-
 }
 
 int main() {
@@ -22,4 +22,7 @@ int main() {
     Require(sceSysmoduleUnloadModuleInternal(kFiberModuleId) == 0);
     Require(sceSysmoduleUnloadModuleInternal(kFiberModuleId) == 0);
     Require(sceSysmoduleUnloadModuleInternal(kFiberModuleId) == kModuleNotLoaded);
+    Require(sceSysmoduleLoadModuleInternal(kNpTrophy2ModuleId) == 0);
+    Require(sceSysmoduleUnloadModuleInternal(kNpTrophy2ModuleId) == 0);
+    Require(sceSysmoduleUnloadModuleInternal(kNpTrophy2ModuleId) == kModuleNotLoaded);
 }
