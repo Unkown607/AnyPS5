@@ -40,7 +40,7 @@ int APS5_VABI sceNpWebApi2CreateRequest(int user_context_id, const char* api_gro
 int APS5_VABI sceNpWebApi2CreateUserContext(int lib_ctx_id, int user_id) {
     (void)lib_ctx_id;
     (void)user_id;
-    return g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    return SCE_NP_WEBAPI2_ERROR_UNAVAILABLE;
 }
 
 int APS5_VABI sceNpWebApi2DeleteRequest(int64_t request_id) {
@@ -71,7 +71,7 @@ int APS5_VABI sceNpWebApi2GetHttpResponseHeaderValueLength(int64_t request_id, c
 int APS5_VABI sceNpWebApi2Initialize(int lib_http_ctx_id, size_t pool_size) {
     (void)lib_http_ctx_id;
     (void)pool_size;
-    return g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    return SCE_NP_WEBAPI2_ERROR_UNAVAILABLE;
 }
 
 int APS5_VABI sceNpWebApi2PushEventCreateFilter(int lib_ctx_id, int handle_id, const char* np_service_name, uint32_t np_service_label, const void* filter_param, size_t filter_param_num) {
