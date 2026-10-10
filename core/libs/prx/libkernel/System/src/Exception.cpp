@@ -12,6 +12,9 @@
 #include <stdexcept>
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <signal.h>
+#include <ucontext.h>
 #endif
 
 extern "C" Pthread APS5_VABI scePthreadSelf();
@@ -99,6 +102,113 @@ GuestExceptionHandler Handler(int signum) {
     std::lock_guard lock(handlersLock);
     return reinterpret_cast<GuestExceptionHandler>(handlers[signum]);
 }
+
+#ifndef _WIN32
+int GuestSignalFromNative(int native) {
+    switch (native) {
+        case SIGBUS:  return 10;
+        case SIGSEGV: return 11;
+        case SIGILL:  return 4;
+        case SIGFPE:  return 8;
+        case SIGTRAP: return 1;
+        default: return 0;
+    }
+}
+
+int NativeSignalFromGuest(int guest) {
+    switch (guest) {
+        case 1:  return SIGTRAP;
+        case 4:  return SIGILL;
+        case 8:  return SIGFPE;
+        case 10: return SIGBUS;
+        case 11: return SIGSEGV;
+        default: return 0;
+    }
+}
+
+void LinuxExceptionDispatch(int sig, siginfo_t* info, void* ctx) {
+    const int guest = GuestSignalFromNative(sig);
+    if (!guest) return;
+    const auto handler = Handler(guest);
+    if (handler == nullptr) {
+        struct sigaction sa{};
+        sa.sa_handler = SIG_DFL;
+        sigaction(sig, &sa, nullptr);
+        raise(sig);
+        return;
+    }
+    auto* uc = static_cast<ucontext_t*>(ctx);
+    auto& mc = uc->uc_mcontext;
+    GuestUcontext guest_uc{};
+    auto& gm = guest_uc.mcontext;
+    gm.rdi    = mc.gregs[REG_RDI];
+    gm.rsi    = mc.gregs[REG_RSI];
+    gm.rdx    = mc.gregs[REG_RDX];
+    gm.rcx    = mc.gregs[REG_RCX];
+    gm.r8     = mc.gregs[REG_R8];
+    gm.r9     = mc.gregs[REG_R9];
+    gm.rax    = mc.gregs[REG_RAX];
+    gm.rbx    = mc.gregs[REG_RBX];
+    gm.rbp    = mc.gregs[REG_RBP];
+    gm.r10    = mc.gregs[REG_R10];
+    gm.r11    = mc.gregs[REG_R11];
+    gm.r12    = mc.gregs[REG_R12];
+    gm.r13    = mc.gregs[REG_R13];
+    gm.r14    = mc.gregs[REG_R14];
+    gm.r15    = mc.gregs[REG_R15];
+    gm.trapno = static_cast<std::uint32_t>(mc.gregs[REG_TRAPNO]);
+    gm.addr   = reinterpret_cast<std::uint64_t>(info->si_addr);
+    gm.err    = mc.gregs[REG_ERR];
+    gm.rip    = mc.gregs[REG_RIP];
+    gm.cs     = mc.gregs[REG_CSGSFS] & 0xFFFF;
+    gm.rflags = mc.gregs[REG_EFL];
+    gm.rsp    = mc.gregs[REG_RSP];
+    gm.ss     = (mc.gregs[REG_CSGSFS] >> 48) & 0xFFFF;
+    gm.len    = sizeof(GuestMcontext);
+    if (uc->uc_mcontext.fpregs) {
+        static_assert(sizeof(gm.fpstate) >= sizeof(*uc->uc_mcontext.fpregs));
+        std::memcpy(gm.fpstate, uc->uc_mcontext.fpregs, sizeof(*uc->uc_mcontext.fpregs));
+    }
+
+    handler(guest, &guest_uc);
+
+    mc.gregs[REG_RDI] = gm.rdi;
+    mc.gregs[REG_RSI] = gm.rsi;
+    mc.gregs[REG_RDX] = gm.rdx;
+    mc.gregs[REG_RCX] = gm.rcx;
+    mc.gregs[REG_R8]  = gm.r8;
+    mc.gregs[REG_R9]  = gm.r9;
+    mc.gregs[REG_RAX] = gm.rax;
+    mc.gregs[REG_RBX] = gm.rbx;
+    mc.gregs[REG_RBP] = gm.rbp;
+    mc.gregs[REG_R10] = gm.r10;
+    mc.gregs[REG_R11] = gm.r11;
+    mc.gregs[REG_R12] = gm.r12;
+    mc.gregs[REG_R13] = gm.r13;
+    mc.gregs[REG_R14] = gm.r14;
+    mc.gregs[REG_R15] = gm.r15;
+    mc.gregs[REG_RIP] = gm.rip;
+    mc.gregs[REG_RSP] = gm.rsp;
+    mc.gregs[REG_EFL] = gm.rflags;
+    if (uc->uc_mcontext.fpregs) {
+        std::memcpy(uc->uc_mcontext.fpregs, gm.fpstate, sizeof(*uc->uc_mcontext.fpregs));
+    }
+}
+
+void InstallNativeHandler(int nativeSig) {
+    struct sigaction sa{};
+    sa.sa_sigaction = LinuxExceptionDispatch;
+    sa.sa_flags = SA_SIGINFO | SA_NODEFER;
+    sigemptyset(&sa.sa_mask);
+    sigaction(nativeSig, &sa, nullptr);
+}
+
+void RemoveNativeHandler(int nativeSig) {
+    struct sigaction sa{};
+    sa.sa_handler = SIG_DFL;
+    sigaction(nativeSig, &sa, nullptr);
+}
+#endif
 
 #ifdef _WIN32
 constexpr std::size_t RedZone = 128;
@@ -349,6 +459,10 @@ int APS5_VABI sceKernelInstallExceptionHandler(int signum, void* handler) {
  std::lock_guard lock(handlersLock);
  if (handlers[signum] != nullptr) return SCE_KERNEL_ERROR_EAGAIN;
  handlers[signum] = handler;
+#ifndef _WIN32
+ const int native = NativeSignalFromGuest(signum);
+ if (native) InstallNativeHandler(native);
+#endif
  return 0;
 }
 
@@ -356,6 +470,10 @@ int APS5_VABI sceKernelRemoveExceptionHandler(int signum) {
  if (!Allowed(signum)) return SCE_KERNEL_ERROR_EINVAL;
  std::lock_guard lock(handlersLock);
  handlers[signum] = nullptr;
+#ifndef _WIN32
+ const int native = NativeSignalFromGuest(signum);
+ if (native) RemoveNativeHandler(native);
+#endif
  return 0;
 }
 
