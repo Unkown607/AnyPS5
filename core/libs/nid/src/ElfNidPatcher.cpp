@@ -497,6 +497,11 @@ void ElfNidPatcher::PatchNids(std::vector<std::uint8_t>& elf, const std::string&
 
     if (gnuHashOffset != 0u) {
         const auto bucketCount = Read<std::uint32_t>(elf, gnuHashOffset);
+        const auto bloomSize = Read<std::uint32_t>(elf, gnuHashOffset + 8u);
+        if (bucketCount == 0u)
+            throw std::runtime_error(".gnu.hash has zero buckets");
+        if (bloomSize == 0u)
+            throw std::runtime_error(".gnu.hash has zero bloom filter words");
         std::vector<std::uint32_t> oldToNewIndex(symCount);
         ReorderDynSymForGnuHash(elf, dynSymOffset, symCount, gnuHashSymOffset, bucketCount, newSymbolNames, oldToNewIndex);
         FixupRelocationSymbolIndices(elf, ehdr, dynSymSectionIndex, oldToNewIndex);
